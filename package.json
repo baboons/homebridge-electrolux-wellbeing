@@ -1,16 +1,16 @@
 {
   "private": true,
-  "displayName": "Plugin Name",
-  "name": "homebridge-plugin-name",
-  "version": "1.0.0",
-  "description": "A short description about what your plugin does.",
+  "displayName": "Homebridge Electrolux Wellbeing",
+  "name": "homebridge-electrolux-wellbeing",
+  "version": "0.0.1",
+  "description": "Connects to your Electrolux Pure A9.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git://github.com/USERNAME/GITHUB_PROJECT_NAME.git"
+    "url": "git://github.com/baboons/homebridge-electrolux-wellbeing.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME/issues"
+    "url": "https://github.com/baboons/homebridge-electrolux-wellbeing.git/issues"
   },
   "engines": {
     "node": ">=10.17.0",
@@ -26,7 +26,10 @@
   "keywords": [
     "homebridge-plugin"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "axios": "^0.19.0",
+    "lodash": "^4.17.20"
+  },
   "devDependencies": {
     "@types/node": "^14.11.8",
     "@typescript-eslint/eslint-plugin": "^4.4.1",

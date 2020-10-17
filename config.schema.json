@@ -1,15 +1,33 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "ElectroluxWellbeing",
   "pluginType": "platform",
   "singular": true,
   "schema": {
     "type": "object",
     "properties": {
-      "name": {
-        "title": "Name",
+      "username": {
+        "title": "Username",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
+        "default": ""
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "default": ""
+      },
+      "clientSecret": {
+        "title": "Client Secret",
+        "type": "string",
+        "required": true,
+        "default": ""
+      },
+      "pollTime": {
+        "title": "Polling time (seconds)",
+        "type": "number",
+        "required": true,
+        "default": 10
       }
     }
   }
