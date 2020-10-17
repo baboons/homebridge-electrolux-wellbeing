@@ -53,8 +53,6 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
           password: this.config.password,
         });
 
-        this.removeAccessories();
-        return;
         const appliances = await this.getAllAppliances();
 
         appliances.map(({applianceName, modelName, pncId}) => {
