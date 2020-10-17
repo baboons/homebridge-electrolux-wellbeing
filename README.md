@@ -1,6 +1,6 @@
 # Homebridge integration for Electrolux Wellbeing
 
-This is Electrolux Wellbeing plugin for [Homebridge](https://github.com/nfarina/homebridge). This plugin will add Electrolux Air Purifier with all it's sensor 
+This is the Electrolux Wellbeing plugin for [Homebridge](https://github.com/nfarina/homebridge). This plugin will add support for Electrolux Air Purifier with all it's sensors (Air Quality, Temperature, Humidity and CO2) 
 to your Home app. 
 
 ## Installation
@@ -19,4 +19,4 @@ You need to use a proxy like [Charles](https://www.charlesproxy.com/) to interce
 
 ## How to use fan speed
 
-Since Electrolux Air Purifier has 3 states, Off, Auto and Manual, changing the fan speed while in auto mode wont increase the fan until you go in to manual (which can be set on the accessory in Home app).   
+Since Electrolux Air Purifier has 3 states (Off, Auto and Manual) and changing the fan speed while in auto mode will not increase the fan, not until you switch to manual working mode (which can be set in for accessory in the Home app).   
