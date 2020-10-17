@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import homebridge from 'homebridge';
 
 declare type Username = string;

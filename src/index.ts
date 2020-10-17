@@ -14,6 +14,7 @@ import {
 } from 'homebridge';
 import {createClient} from './api';
 import {Appliance, WorkModes} from './types';
+import {AxiosInstance} from 'axios';
 
 const PLUGIN_NAME = 'electrolux-wellbeing';
 const PLATFORM_NAME = 'ElectroluxWellbeing';
@@ -32,7 +33,7 @@ export = (api: API) => {
 
 class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
 
-    private client: any;
+    private client?: AxiosInstance;
     private readonly log: Logging;
     private readonly api: API;
     private readonly config: PlatformConfig;
@@ -52,6 +53,8 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
           password: this.config.password,
         });
 
+        this.removeAccessories();
+        return;
         const appliances = await this.getAllAppliances();
 
         appliances.map(({applianceName, modelName, pncId}) => {
@@ -89,7 +92,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       return await Promise.all(
         this.accessories.map(async accessory => {
           const {pncId} = accessory.context;
-          const response = await this.client.get(`/Appliances/${pncId}`);
+          const response = await this.client!.get(`/Appliances/${pncId}`);
 
           const {twin: {properties: {reported}}} = response.data;
 
@@ -125,18 +128,18 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     }
 
     async getAllAppliances() {
-      const response = await this.client.get('/Domains/Appliances');
+      const response = await this.client!.get('/Domains/Appliances');
 
       return _.get(response, 'data', []);
     }
 
-    async sendCommand(pncId: string, command: string, value: any) {
+    async sendCommand(pncId: string, command: string, value: CharacteristicValue) {
 
       this.log.debug('sending command', {
         [command]: value,
       });
 
-      const response = await this.client.put(`/Appliances/${pncId}/Commands`, {
+      const response = await this.client!.put(`/Appliances/${pncId}/Commands`, {
         [command]: value,
       });
 

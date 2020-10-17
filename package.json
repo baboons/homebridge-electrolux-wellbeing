@@ -1,9 +1,8 @@
 {
-  "private": true,
   "displayName": "Homebridge Electrolux Wellbeing",
   "name": "homebridge-electrolux-wellbeing",
   "version": "0.0.1",
-  "description": "Connects to your Electrolux Pure A9.",
+  "description": "Connects to your Electrolux Purefier.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
