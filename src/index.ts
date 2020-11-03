@@ -12,13 +12,14 @@ import {
   PlatformAccessoryEvent,
   PlatformConfig,
 } from 'homebridge';
-import {createClient} from './api';
-import {Appliance, WorkModes} from './types';
-import {AxiosInstance} from 'axios';
+import { AxiosInstance } from 'axios';
+
+import { createClient } from './api';
+import { Appliance, WorkModes } from './types';
 
 const PLUGIN_NAME = 'electrolux-wellbeing';
 const PLATFORM_NAME = 'ElectroluxWellbeing';
-const FAN_SPEED_MULTIPLIER = 100/8;
+const FAN_SPEED_MULTIPLIER = 100 / 8;
 
 let hap: HAP, Service, Characteristic;
 let Accessory: typeof PlatformAccessory;
@@ -32,67 +33,85 @@ export = (api: API) => {
 };
 
 class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
+  private client?: AxiosInstance;
+  private readonly log: Logging;
+  private readonly api: API;
+  private readonly config: PlatformConfig;
+  private readonly accessories: PlatformAccessory[] = [];
 
-    private client?: AxiosInstance;
-    private readonly log: Logging;
-    private readonly api: API;
-    private readonly config: PlatformConfig;
-    private readonly accessories: PlatformAccessory[] = [];
+  constructor(log: Logging, config: PlatformConfig, api: API) {
+    this.log = log;
+    this.api = api;
+    this.config = config;
 
-    constructor(log: Logging, config: PlatformConfig, api: API) {
-      this.log = log;
-      this.api = api;
-      this.config = config;
+    api.on(APIEvent.DID_FINISH_LAUNCHING, async () => {
+      if (this.needsConfiguration()) {
+        this.log('Please configure this plugin first.');
+        return;
+      }
 
-      api.on(APIEvent.DID_FINISH_LAUNCHING, async () => {
-        log.info('Example platform \'didFinishLaunching\'');
+      //this.removeAccessories();
 
+      try {
         this.client = await createClient({
-          clientSecret: this.config.clientSecret,
           username: this.config.username,
           password: this.config.password,
         });
-
-        const appliances = await this.getAllAppliances();
-
-        appliances.map(({applianceName, modelName, pncId}) => {
-          this.addAccessory({
-            pncId,
-            name: applianceName,
-            modelName,
-          });
-        });
-
-        await this.checkAppliances();
-        setInterval(() => this.checkAppliances(), this.getPollTime(this.config.pollTime));
-      });
-    }
-
-    getPollTime(pollTime): number {
-
-      if (!pollTime || pollTime < 5) {
-        this.log.debug('Set poll time is below 5s, forcing 5s');
-        return 5 * 1000;
+      } catch (err) {
+        this.log.debug('Error while creating client', err);
+        return;
       }
 
-      this.log.debug(`Refreshing every ${pollTime}s`);
-      return pollTime * 1000;
+      const appliances = await this.getAllAppliances();
+
+      appliances.map(({ applianceName, modelName, pncId }) => {
+        this.addAccessory({
+          pncId,
+          name: applianceName,
+          modelName,
+        });
+      });
+
+      await this.checkAppliances();
+      setInterval(
+        () => this.checkAppliances(),
+        this.getPollTime(this.config.pollTime),
+      );
+    });
+  }
+
+  needsConfiguration(): boolean {
+    return !this.config.username || !this.config.password;
+  }
+
+  getPollTime(pollTime): number {
+    if (!pollTime || pollTime < 5) {
+      this.log.info('Set poll time is below 5s, forcing 5s');
+      return 5 * 1000;
     }
 
-    async checkAppliances() {
-      const data = await this.fetchApplianceData();
+    this.log.debug(`Refreshing every ${pollTime}s`);
+    return pollTime * 1000;
+  }
 
-      //this.log.debug('Fetched: ', data);
-      this.updateValues(data);
-    }
+  async checkAppliances() {
+    const data = await this.fetchApplianceData();
 
-    async fetchApplianceData() {
-      return await Promise.all(
-        this.accessories.map(async accessory => {
-          const {pncId} = accessory.context;
+    this.log.debug('Fetched: ', data);
+    this.updateValues(data);
+  }
+
+  async fetchApplianceData() {
+    return await Promise.all(
+      this.accessories.map(async (accessory) => {
+        const { pncId } = accessory.context;
+        try {
           const response = await this.client!.get(`/Appliances/${pncId}`);
-
-          const {twin: {properties: {reported}}} = response.data;
+          const {
+            twin: {
+              properties: { reported },
+            },
+          } = response.data;
 
           return {
             pncId,
@@ -120,189 +139,288 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
             envLightLevel: reported.EnvLightLvl,
             rssi: reported.RSSI,
           };
+        } catch (err) {
+          this.log('Could not fetch appliances data');
+        }
+      }),
+    );
+  }
 
-        }),
-      );
-    }
-
-    async getAllAppliances() {
+  async getAllAppliances() {
+    try {
       const response = await this.client!.get('/Domains/Appliances');
-
       return _.get(response, 'data', []);
+    } catch (err) {
+      this.log.info('Could not fetch appliances');
+      return [];
     }
+  }
 
-    async sendCommand(pncId: string, command: string, value: CharacteristicValue) {
+  async sendCommand(
+    pncId: string,
+    command: string,
+    value: CharacteristicValue,
+  ) {
+    this.log.debug('sending command', {
+      [command]: value,
+    });
 
-      this.log.debug('sending command', {
-        [command]: value,
-      });
-
+    try {
       const response = await this.client!.put(`/Appliances/${pncId}/Commands`, {
         [command]: value,
       });
-
       this.log.debug('command responded', response.data);
+    } catch (err) {
+      this.log.info('Could run command', err);
     }
+  }
 
-    updateValues(data) {
+  updateValues(data) {
+    this.accessories.map((accessory) => {
+      const { pncId } = accessory.context;
+      const state = this.getApplianceState(pncId, data);
 
-      this.accessories.map(accessory => {
-        const {pncId} = accessory.context;
-        const state = this.getApplianceState(pncId, data);
+      accessory
+        .getService(Service.TemperatureSensor)!
+        .updateCharacteristic(Characteristic.CurrentTemperature, state.temp);
 
-        accessory.getService(Service.TemperatureSensor)!
-          .updateCharacteristic(Characteristic.CurrentTemperature, state.temp);
+      accessory
+        .getService(Service.HumiditySensor)!
+        .updateCharacteristic(
+          Characteristic.CurrentRelativeHumidity,
+          state.humidity,
+        );
 
-        accessory.getService(Service.HumiditySensor)!
-          .updateCharacteristic(Characteristic.CurrentRelativeHumidity, state.humidity);
+      accessory
+        .getService(Service.CarbonDioxideSensor)!
+        .updateCharacteristic(Characteristic.CarbonDioxideLevel, state.co2);
 
-        accessory.getService(Service.CarbonDioxideSensor)!
-          .updateCharacteristic(Characteristic.CarbonDioxideLevel, state.co2);
+      // Env Light Level needs to be tested with lux meter
+      accessory
+        .getService(Service.LightSensor)!
+        .updateCharacteristic(
+          Characteristic.CurrentAmbientLightLevel,
+          state.envLightLevel,
+        );
 
-        accessory.getService(Service.AirQualitySensor)!
-          .updateCharacteristic(Characteristic.AirQuality, this.getAirQualityLevel(state.pm25))
-          .updateCharacteristic(Characteristic.PM2_5Density, state.pm25)
-          .updateCharacteristic(Characteristic.PM10Density, state.pm10)
-          .updateCharacteristic(Characteristic.VOCDensity, state.tvoc);
+      accessory
+        .getService(Service.AirQualitySensor)!
+        .updateCharacteristic(
+          Characteristic.AirQuality,
+          this.getAirQualityLevel(state.pm25),
+        )
+        .updateCharacteristic(Characteristic.PM2_5Density, state.pm25)
+        .updateCharacteristic(Characteristic.PM10Density, state.pm10)
+        .updateCharacteristic(Characteristic.VOCDensity, state.tvoc);
 
-        accessory.getService(Service.AirPurifier)!
-          .updateCharacteristic(Characteristic.Active, state.workMode !== WorkModes.Off)
-          .updateCharacteristic(Characteristic.CurrentAirPurifierState, this.getAirPurifierState(state.workMode))
-          .updateCharacteristic(Characteristic.TargetAirPurifierState, this.getAirPurifierStateTarget(state.workMode))
-          .updateCharacteristic(Characteristic.RotationSpeed, state.fanSpeed * FAN_SPEED_MULTIPLIER)
-          .updateCharacteristic(Characteristic.LockPhysicalControls, state.safetyLock);
-      });
-    }
+      accessory
+        .getService(Service.AirPurifier)!
+        .updateCharacteristic(Characteristic.FilterLifeLevel, state.filterLife)
+        .updateCharacteristic(
+          Characteristic.FilterChangeIndication,
+          parseInt(state.filterLife) < 10
+            ? Characteristic.FilterChangeIndication.CHANGE_FILTER
+            : Characteristic.FilterChangeIndication.FILTER_OK,
+        )
+        .updateCharacteristic(
+          Characteristic.Active,
+          state.workMode !== WorkModes.Off,
+        )
+        .updateCharacteristic(
+          Characteristic.CurrentAirPurifierState,
+          this.getAirPurifierState(state.workMode),
+        )
+        .updateCharacteristic(
+          Characteristic.TargetAirPurifierState,
+          this.getAirPurifierStateTarget(state.workMode),
+        )
+        .updateCharacteristic(
+          Characteristic.RotationSpeed,
+          state.fanSpeed * FAN_SPEED_MULTIPLIER,
+        )
+        .updateCharacteristic(
+          Characteristic.LockPhysicalControls,
+          state.safetyLock,
+        )
+        .updateCharacteristic(Characteristic.SwingMode, state.ionizer);
+    });
+  }
 
-    getApplianceState(pncId: string, data): Appliance {
-      return _.find(data, {pncId});
-    }
+  getApplianceState(pncId: string, data): Appliance {
+    return _.find(data, { pncId });
+  }
 
-    configureAccessory(accessory: PlatformAccessory): void {
-      this.log('Configuring accessory %s', accessory.displayName);
+  configureAccessory(accessory: PlatformAccessory): void {
+    this.log('Configuring accessory %s', accessory.displayName);
 
-      const {pncId} = accessory.context;
+    const { pncId } = accessory.context;
 
-      accessory.on(PlatformAccessoryEvent.IDENTIFY, () => {
-        this.log('%s identified!', accessory.displayName);
-      });
+    accessory.on(PlatformAccessoryEvent.IDENTIFY, () => {
+      this.log('%s identified!', accessory.displayName);
+    });
 
-
-      accessory.getService(Service.AirPurifier)!.getCharacteristic(Characteristic.Active)
-        .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+    accessory
+      .getService(Service.AirPurifier)!
+      .getCharacteristic(Characteristic.Active)
+      .on(
+        CharacteristicEventTypes.SET,
+        (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
           const workMode = value === 1 ? WorkModes.Auto : WorkModes.Off;
 
-          if (accessory.getService(Service.AirPurifier)!.getCharacteristic(Characteristic.Active).value !== value) {
+          if (
+            accessory
+              .getService(Service.AirPurifier)!
+              .getCharacteristic(Characteristic.Active).value !== value
+          ) {
             this.sendCommand(pncId, 'WorkMode', workMode);
             this.log.info('%s AirPurifier Active was set to: ' + workMode);
           }
 
           callback();
-        });
+        },
+      );
 
-      accessory.getService(Service.AirPurifier)!.getCharacteristic(Characteristic.TargetAirPurifierState)
-        .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-
-          const workMode = value === Characteristic.TargetAirPurifierState.MANUAL ? WorkModes.Manual : WorkModes.Auto;
+    accessory
+      .getService(Service.AirPurifier)!
+      .getCharacteristic(Characteristic.TargetAirPurifierState)
+      .on(
+        CharacteristicEventTypes.SET,
+        (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+          const workMode =
+            value === Characteristic.TargetAirPurifierState.MANUAL
+              ? WorkModes.Manual
+              : WorkModes.Auto;
           this.sendCommand(pncId, 'WorkMode', workMode);
           this.log.info('%s AirPurifier Work Mode was set to: ' + workMode);
           callback();
-        });
+        },
+      );
 
-      accessory.getService(Service.AirPurifier)!.getCharacteristic(Characteristic.RotationSpeed)
-        .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-
-          const fanSpeed = Math.floor(parseInt(value.toString()) / FAN_SPEED_MULTIPLIER);
+    accessory
+      .getService(Service.AirPurifier)!
+      .getCharacteristic(Characteristic.RotationSpeed)
+      .on(
+        CharacteristicEventTypes.SET,
+        (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+          const fanSpeed = Math.floor(
+            parseInt(value.toString()) / FAN_SPEED_MULTIPLIER,
+          );
           this.sendCommand(pncId, 'FanSpeed', fanSpeed);
-            
+
           this.log.info('%s AirPurifier Fan Speed set to: ' + fanSpeed);
           callback();
-        });
+        },
+      );
 
-      accessory.getService(Service.AirPurifier)!.getCharacteristic(Characteristic.LockPhysicalControls)
-        .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-
+    accessory
+      .getService(Service.AirPurifier)!
+      .getCharacteristic(Characteristic.LockPhysicalControls)
+      .on(
+        CharacteristicEventTypes.SET,
+        (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
           this.sendCommand(pncId, 'SafetyLock', value);
 
           this.log.info('%s AirPurifier Saftey Lock set to: ' + value);
           callback();
-        });
+        },
+      );
 
+    accessory
+      .getService(Service.AirPurifier)!
+      .getCharacteristic(Characteristic.SwingMode)
+      .on(
+        CharacteristicEventTypes.SET,
+        (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+          this.sendCommand(pncId, 'Ionizer', value);
 
-      this.accessories.push(accessory);
-    }
+          this.log.info('%s AirPurifier Ionizer set to: ' + value);
+          callback();
+        },
+      );
 
-    addAccessory({name, modelName, pncId}) {
+    this.accessories.push(accessory);
+  }
 
+  addAccessory({ name, modelName, pncId }) {
+    const uuid = hap.uuid.generate(pncId);
+
+    if (!this.isAccessoryRegistered(name, uuid)) {
       this.log.info('Adding new accessory with name %s', name);
+      const accessory = new Accessory(name, uuid);
 
-      const uuid = hap.uuid.generate(pncId);
+      accessory.context.pncId = pncId;
 
-      if (!this.isAccessoryRegistered(name, uuid)) {
+      accessory.addService(Service.AirPurifier);
+      accessory.addService(Service.AirQualitySensor);
+      accessory.addService(Service.TemperatureSensor);
+      accessory.addService(Service.CarbonDioxideSensor);
+      accessory.addService(Service.HumiditySensor);
+      accessory.addService(Service.LightSensor);
 
-        const accessory = new Accessory(name, uuid);
+      accessory
+        .getService(Service.AccessoryInformation)!
+        .setCharacteristic(Characteristic.Manufacturer, 'Electrolux')
+        .setCharacteristic(Characteristic.Model, modelName)
+        .setCharacteristic(Characteristic.SerialNumber, pncId);
 
-        accessory.context.pncId = pncId;
+      this.configureAccessory(accessory);
 
-        accessory.addService(Service.AirPurifier);
-        accessory.addService(Service.AirQualitySensor);
-        accessory.addService(Service.TemperatureSensor);
-        accessory.addService(Service.CarbonDioxideSensor);
-        accessory.addService(Service.HumiditySensor);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
+        accessory,
+      ]);
+    } else {
+      this.log.info(
+        'Accessory name %s already added, loading from cache ',
+        name,
+      );
+    }
+  }
 
-        accessory.getService(Service.AccessoryInformation)!
-          .setCharacteristic(Characteristic.Manufacturer, 'Electrolux')
-          .setCharacteristic(Characteristic.Model, modelName)
-          .setCharacteristic(Characteristic.SerialNumber, pncId);
+  removeAccessories() {
+    this.log.info('Removing all accessories');
 
-        this.configureAccessory(accessory);
+    this.api.unregisterPlatformAccessories(
+      PLUGIN_NAME,
+      PLATFORM_NAME,
+      this.accessories,
+    );
+    this.accessories.splice(0, this.accessories.length);
+  }
 
-        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      }
+  isAccessoryRegistered(name: string, uuid: string) {
+    return !!_.find(this.accessories, { UUID: uuid });
+  }
+
+  getAirQualityLevel(pm25: number): number {
+    switch (true) {
+      case pm25 < 6:
+        return Characteristic.AirQuality.EXCELLENT;
+      case pm25 < 12:
+        return Characteristic.AirQuality.GOOD;
+      case pm25 < 36:
+        return Characteristic.AirQuality.FAIR;
+      case pm25 < 50:
+        return Characteristic.AirQuality.INFERIOR;
+      case pm25 >= 50:
+        return Characteristic.AirQuality.POOR;
     }
 
-    removeAccessories() {
-      this.log.info('Removing all accessories');
+    return Characteristic.AirQuality.UNKNOWN;
+  }
 
-      this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, this.accessories);
-      this.accessories.splice(0, this.accessories.length);
+  getAirPurifierState(workMode: WorkModes): number {
+    if (workMode !== WorkModes.Off) {
+      return Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
     }
 
-    isAccessoryRegistered(name: string, uuid: string) {
-      return !!_.find(this.accessories, {UUID: uuid});
+    return Characteristic.CurrentAirPurifierState.INACTIVE;
+  }
+
+  getAirPurifierStateTarget(workMode: WorkModes): number {
+    if (workMode === WorkModes.Auto) {
+      return Characteristic.TargetAirPurifierState.AUTO;
     }
 
-    getAirQualityLevel(pm25: number): number {
-      switch(true) {
-        case pm25 < 6:
-          return Characteristic.AirQuality.EXCELLENT;
-        case pm25 < 12:
-          return Characteristic.AirQuality.GOOD;
-        case pm25 < 36:
-          return Characteristic.AirQuality.FAIR;
-        case pm25 < 50:
-          return Characteristic.AirQuality.INFERIOR;
-        case pm25 >= 50:
-          return Characteristic.AirQuality.POOR;
-      }
-
-      return Characteristic.AirQuality.UNKNOWN;
-    }
-
-    getAirPurifierState(workMode: WorkModes): number {
-      if (workMode !== WorkModes.Off) {
-        return Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-      }
-
-      return Characteristic.CurrentAirPurifierState.INACTIVE;
-    }
-
-    getAirPurifierStateTarget(workMode: WorkModes): number {
-      if (workMode === WorkModes.Auto) {
-        return Characteristic.TargetAirPurifierState.AUTO;
-      }
-
-      return Characteristic.TargetAirPurifierState.MANUAL;
-    }
-
+    return Characteristic.TargetAirPurifierState.MANUAL;
+  }
 }

@@ -17,12 +17,6 @@
         "required": true,
         "default": ""
       },
-      "clientSecret": {
-        "title": "Client Secret",
-        "type": "string",
-        "required": true,
-        "default": ""
-      },
       "pollTime": {
         "title": "Polling time (seconds)",
         "type": "number",
