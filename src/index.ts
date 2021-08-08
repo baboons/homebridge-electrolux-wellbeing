@@ -230,7 +230,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         )
         .updateCharacteristic(Characteristic.PM2_5Density, state.pm25)
         .updateCharacteristic(Characteristic.PM10Density, state.pm10)
-        .updateCharacteristic(Characteristic.VOCDensity, state.tvoc);
+        .updateCharacteristic(
+          Characteristic.VOCDensity,
+          this.convertTVOCToDensity(state.tvoc),
+        );
 
       accessory
         .getService(Service.AirPurifier)!
@@ -457,5 +460,30 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     }
 
     return Characteristic.TargetAirPurifierState.MANUAL;
+  }
+
+  // Best effort attempt to convert Wellbeing TVOC ppb reading to μg/m3, but we lack insight into their algorithms
+  // or TVOC densities. We assume 1 ppb = 3.243 μg/m3 (see benzene @ 20C [1]) as this produces results (μg/m3) that fit
+  // quite well within the defined ranges in [2].
+  //
+  // Wellbeing defines 1500 ppb as possibly having an effect on health when exposed to these levels for a month, [2]
+  // lists 400-500 μg/m3 as _marginal_ which sounds like a close approximation. Here's an example where 1500 ppb falls
+  // within the _marginal_ range.
+  //
+  //   1500 * 3.243 / 10 = 486.45
+  //
+  // Note: It's uncertain why we have to divide the result by 10 for the values to make sense, perhaps this is a
+  // Wellbeing quirk, but at least the values look good.
+  //
+  // The maximum value shown by Wellbeing is 4000 ppb and the maximum value accepted by HomeKit is 1000 μg/m3, our
+  // assumed molecular density may put the value outside of the HomeKit range, but not by much, which seems acceptable:
+  //
+  //  4000 * 3.243 / 10 = 1297.2
+  //
+  // [1] https://uk-air.defra.gov.uk/assets/documents/reports/cat06/0502160851_Conversion_Factors_Between_ppb_and.pdf
+  // [2] https://myhealthyhome.info/assets/pdfs/TB531rev2TVOCInterpretation.pdf
+  convertTVOCToDensity(tvocppb: number): number {
+    const ugm3 = (tvocppb * 3.243) / 10;
+    return Math.min(ugm3, 1000);
   }
 }
