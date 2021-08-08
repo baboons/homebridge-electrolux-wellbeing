@@ -65,16 +65,22 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       }
 
       const appliances = await this.getAllAppliances();
+      const applianceData = await Promise.all(
+        appliances.map((appliance) => this.fetchApplianceData(appliance.pncId)),
+      );
 
-      appliances.map(({ applianceName, modelName, pncId }) => {
+      this.log.debug('Fetched: ', applianceData);
+
+      appliances.map(({ applianceName, modelName, pncId }, i) => {
         this.addAccessory({
           pncId,
           name: applianceName,
           modelName,
+          firmwareVersion: applianceData[i]?.firmwareVersion,
         });
       });
 
-      await this.checkAppliances();
+      this.updateValues(applianceData);
       setInterval(
         () => this.checkAppliances(),
         this.getPollTime(this.config.pollTime),
@@ -97,55 +103,58 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
   }
 
   async checkAppliances() {
-    const data = await this.fetchApplianceData();
+    const data = await this.fetchAppliancesData();
 
     this.log.debug('Fetched: ', data);
     this.updateValues(data);
   }
 
-  async fetchApplianceData() {
+  async fetchAppliancesData() {
     return await Promise.all(
-      this.accessories.map(async (accessory) => {
-        const { pncId } = accessory.context;
-        try {
-          const response = await this.client!.get(`/Appliances/${pncId}`);
-          const {
-            twin: {
-              properties: { reported },
-            },
-          } = response.data;
-
-          return {
-            pncId,
-            name: response.data.applianceData.applianceName,
-            modelName: response.data.applianceData.modelName,
-            firmwareVersion: reported.FrmVer_NIU,
-            workMode: reported.Workmode,
-            filterRFID: reported.FilterRFID,
-            filterLife: reported.FilterLife,
-            fanSpeed: reported.Fanspeed,
-            UILight: reported.UILight,
-            safetyLock: reported.SafetyLock,
-            ionizer: reported.Ionizer,
-            sleep: reported.Sleep,
-            scheduler: reported.Scheduler,
-            filterType: reported.FilterType,
-            version: reported['$version'],
-            pm1: reported.PM1,
-            pm25: reported.PM2_5,
-            pm10: reported.PM10,
-            tvoc: reported.TVOC,
-            co2: reported.CO2,
-            temp: reported.Temp,
-            humidity: reported.Humidity,
-            envLightLevel: reported.EnvLightLvl,
-            rssi: reported.RSSI,
-          };
-        } catch (err) {
-          this.log('Could not fetch appliances data');
-        }
-      }),
+      this.accessories.map((accessory) =>
+        this.fetchApplianceData(accessory.context.pncId),
+      ),
     );
+  }
+
+  async fetchApplianceData(pncId: string) {
+    try {
+      const response = await this.client!.get(`/Appliances/${pncId}`);
+      const {
+        twin: {
+          properties: { reported },
+        },
+      } = response.data;
+
+      return {
+        pncId,
+        name: response.data.applianceData.applianceName,
+        modelName: response.data.applianceData.modelName,
+        firmwareVersion: reported.FrmVer_NIU,
+        workMode: reported.Workmode,
+        filterRFID: reported.FilterRFID,
+        filterLife: reported.FilterLife,
+        fanSpeed: reported.Fanspeed,
+        UILight: reported.UILight,
+        safetyLock: reported.SafetyLock,
+        ionizer: reported.Ionizer,
+        sleep: reported.Sleep,
+        scheduler: reported.Scheduler,
+        filterType: reported.FilterType,
+        version: reported['$version'],
+        pm1: reported.PM1,
+        pm25: reported.PM2_5,
+        pm10: reported.PM10,
+        tvoc: reported.TVOC,
+        co2: reported.CO2,
+        temp: reported.Temp,
+        humidity: reported.Humidity,
+        envLightLevel: reported.EnvLightLvl,
+        rssi: reported.RSSI,
+      };
+    } catch (err) {
+      this.log('Could not fetch appliances data');
+    }
   }
 
   async getAllAppliances() {
@@ -181,6 +190,14 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     this.accessories.map((accessory) => {
       const { pncId } = accessory.context;
       const state = this.getApplianceState(pncId, data);
+
+      // Keep firmware revision up-to-date in case the device is updated.
+      accessory
+        .getService(Service.AccessoryInformation)!
+        .setCharacteristic(
+          Characteristic.FirmwareRevision,
+          state.firmwareVersion,
+        );
 
       accessory
         .getService(Service.TemperatureSensor)!
@@ -343,7 +360,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
-  addAccessory({ name, modelName, pncId }) {
+  addAccessory({ name, modelName, pncId, firmwareVersion }) {
     const uuid = hap.uuid.generate(pncId);
 
     if (!this.isAccessoryRegistered(name, uuid)) {
@@ -363,7 +380,8 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         .getService(Service.AccessoryInformation)!
         .setCharacteristic(Characteristic.Manufacturer, 'Electrolux')
         .setCharacteristic(Characteristic.Model, modelName)
-        .setCharacteristic(Characteristic.SerialNumber, pncId);
+        .setCharacteristic(Characteristic.SerialNumber, pncId)
+        .setCharacteristic(Characteristic.FirmwareRevision, firmwareVersion);
 
       this.configureAccessory(accessory);
 
