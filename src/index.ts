@@ -19,7 +19,9 @@ import { Appliance, WorkModes } from './types';
 
 const PLUGIN_NAME = 'electrolux-wellbeing';
 const PLATFORM_NAME = 'ElectroluxWellbeing';
-const FAN_SPEED_MULTIPLIER = 100 / 8;
+
+// Pure A9 fans support speeds from [1, 9].
+const FAN_SPEED_MULTIPLIER = 100 / 9;
 
 let hap: HAP, Service, Characteristic;
 let Accessory: typeof PlatformAccessory;
