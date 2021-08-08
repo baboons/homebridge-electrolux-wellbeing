@@ -153,7 +153,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         rssi: reported.RSSI,
       };
     } catch (err) {
-      this.log('Could not fetch appliances data');
+      this.log.info('Could not fetch appliances data: ' + err);
     }
   }
 
@@ -162,7 +162,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       const response = await this.client!.get('/Domains/Appliances');
       return _.get(response, 'data', []);
     } catch (err) {
-      this.log.info('Could not fetch appliances');
+      this.log.info('Could not fetch appliances: ' + err);
       return [];
     }
   }
@@ -292,7 +292,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
               .getCharacteristic(Characteristic.Active).value !== value
           ) {
             this.sendCommand(pncId, 'WorkMode', workMode);
-            this.log.info('%s AirPurifier Active was set to: ' + workMode);
+            this.log.info(
+              '%s AirPurifier Active was set to: ' + workMode,
+              accessory.displayName,
+            );
           }
 
           callback();
@@ -310,7 +313,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
               ? WorkModes.Manual
               : WorkModes.Auto;
           this.sendCommand(pncId, 'WorkMode', workMode);
-          this.log.info('%s AirPurifier Work Mode was set to: ' + workMode);
+          this.log.info(
+            '%s AirPurifier Work Mode was set to: ' + workMode,
+            accessory.displayName,
+          );
           callback();
         },
       );
@@ -326,7 +332,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
           );
           this.sendCommand(pncId, 'FanSpeed', fanSpeed);
 
-          this.log.info('%s AirPurifier Fan Speed set to: ' + fanSpeed);
+          this.log.info(
+            '%s AirPurifier Fan Speed set to: ' + fanSpeed,
+            accessory.displayName,
+          );
           callback();
         },
       );
@@ -339,7 +348,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
           this.sendCommand(pncId, 'SafetyLock', value);
 
-          this.log.info('%s AirPurifier Saftey Lock set to: ' + value);
+          this.log.info(
+            '%s AirPurifier Saftey Lock set to: ' + value,
+            accessory.displayName,
+          );
           callback();
         },
       );
@@ -352,7 +364,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
           this.sendCommand(pncId, 'Ionizer', value);
 
-          this.log.info('%s AirPurifier Ionizer set to: ' + value);
+          this.log.info(
+            '%s AirPurifier Ionizer set to: ' + value,
+            accessory.displayName,
+          );
           callback();
         },
       );
