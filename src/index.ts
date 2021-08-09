@@ -15,11 +15,13 @@ import {
 import { AxiosInstance } from 'axios';
 
 import { createClient } from './api';
-import { Appliance, WorkModes } from './types';
+import { Appliance, WorkModes, WellbeingApi } from './types';
 
 const PLUGIN_NAME = 'electrolux-wellbeing';
 const PLATFORM_NAME = 'ElectroluxWellbeing';
-const FAN_SPEED_MULTIPLIER = 100 / 8;
+
+// Pure A9 fans support speeds from [1, 9].
+const FAN_SPEED_MULTIPLIER = 100 / 9;
 
 let hap: HAP, Service, Characteristic;
 let Accessory: typeof PlatformAccessory;
@@ -63,16 +65,22 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       }
 
       const appliances = await this.getAllAppliances();
+      const applianceData = await Promise.all(
+        appliances.map((appliance) => this.fetchApplianceData(appliance.pncId)),
+      );
 
-      appliances.map(({ applianceName, modelName, pncId }) => {
+      this.log.debug('Fetched: ', applianceData);
+
+      appliances.map(({ applianceName, modelName, pncId }, i) => {
         this.addAccessory({
           pncId,
           name: applianceName,
           modelName,
+          firmwareVersion: applianceData[i]?.firmwareVersion,
         });
       });
 
-      await this.checkAppliances();
+      this.updateValues(applianceData);
       setInterval(
         () => this.checkAppliances(),
         this.getPollTime(this.config.pollTime),
@@ -95,63 +103,64 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
   }
 
   async checkAppliances() {
-    const data = await this.fetchApplianceData();
+    const data = await this.fetchAppliancesData();
 
     this.log.debug('Fetched: ', data);
     this.updateValues(data);
   }
 
-  async fetchApplianceData() {
+  async fetchAppliancesData() {
     return await Promise.all(
-      this.accessories.map(async (accessory) => {
-        const { pncId } = accessory.context;
-        try {
-          const response = await this.client!.get(`/Appliances/${pncId}`);
-          const {
-            twin: {
-              properties: { reported },
-            },
-          } = response.data;
-
-          return {
-            pncId,
-            name: response.data.applianceData.applianceName,
-            modelName: response.data.applianceData.modelName,
-            firmwareVersion: reported.FrmVer_NIU,
-            workMode: reported.Workmode,
-            filterRFID: reported.FilterRFID,
-            filterLife: reported.FilterLife,
-            fanSpeed: reported.Fanspeed,
-            UILight: reported.UILight,
-            safetyLock: reported.SafetyLock,
-            ionizer: reported.Ionizer,
-            sleep: reported.Sleep,
-            scheduler: reported.Scheduler,
-            filterType: reported.FilterType,
-            version: reported['$version'],
-            pm1: reported.PM1,
-            pm25: reported.PM2_5,
-            pm10: reported.PM10,
-            tvoc: reported.TVOC,
-            co2: reported.CO2,
-            temp: reported.Temp,
-            humidity: reported.Humidity,
-            envLightLevel: reported.EnvLightLvl,
-            rssi: reported.RSSI,
-          };
-        } catch (err) {
-          this.log('Could not fetch appliances data');
-        }
-      }),
+      this.accessories.map((accessory) =>
+        this.fetchApplianceData(accessory.context.pncId),
+      ),
     );
+  }
+
+  async fetchApplianceData(pncId: string): Promise<Appliance | undefined> {
+    try {
+      const response: { data: WellbeingApi.ApplianceData } =
+        await this.client!.get(`/Appliances/${pncId}`);
+      const reported = response.data.twin.properties.reported;
+
+      return {
+        pncId,
+        name: response.data.applianceData.applianceName,
+        modelName: response.data.applianceData.modelName,
+        firmwareVersion: reported.FrmVer_NIU,
+        workMode: reported.Workmode,
+        filterRFID: reported.FilterRFID,
+        filterLife: reported.FilterLife,
+        fanSpeed: reported.Fanspeed,
+        UILight: reported.UILight,
+        safetyLock: reported.SafetyLock,
+        ionizer: reported.Ionizer,
+        sleep: reported.Sleep,
+        scheduler: reported.Scheduler,
+        filterType: reported.FilterType,
+        version: reported['$version'],
+        pm1: reported.PM1,
+        pm25: reported.PM2_5,
+        pm10: reported.PM10,
+        tvoc: reported.TVOC,
+        co2: reported.CO2,
+        temp: reported.Temp,
+        humidity: reported.Humidity,
+        envLightLevel: reported.EnvLightLvl,
+        rssi: reported.RSSI,
+      };
+    } catch (err) {
+      this.log.info('Could not fetch appliances data: ' + err);
+    }
   }
 
   async getAllAppliances() {
     try {
-      const response = await this.client!.get('/Domains/Appliances');
-      return _.get(response, 'data', []);
+      const response: { data: WellbeingApi.Appliance[] } =
+        await this.client!.get('/Domains/Appliances');
+      return response.data;
     } catch (err) {
-      this.log.info('Could not fetch appliances');
+      this.log.info('Could not fetch appliances: ' + err);
       return [];
     }
   }
@@ -180,6 +189,14 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       const { pncId } = accessory.context;
       const state = this.getApplianceState(pncId, data);
 
+      // Keep firmware revision up-to-date in case the device is updated.
+      accessory
+        .getService(Service.AccessoryInformation)!
+        .setCharacteristic(
+          Characteristic.FirmwareRevision,
+          state.firmwareVersion,
+        );
+
       accessory
         .getService(Service.TemperatureSensor)!
         .updateCharacteristic(Characteristic.CurrentTemperature, state.temp);
@@ -195,13 +212,15 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         .getService(Service.CarbonDioxideSensor)!
         .updateCharacteristic(Characteristic.CarbonDioxideLevel, state.co2);
 
-      // Env Light Level needs to be tested with lux meter
-      accessory
-        .getService(Service.LightSensor)!
-        .updateCharacteristic(
-          Characteristic.CurrentAmbientLightLevel,
-          state.envLightLevel,
-        );
+      if (state.envLightLevel) {
+        // Env Light Level needs to be tested with lux meter
+        accessory
+          .getService(Service.LightSensor)!
+          .updateCharacteristic(
+            Characteristic.CurrentAmbientLightLevel,
+            state.envLightLevel,
+          );
+      }
 
       accessory
         .getService(Service.AirQualitySensor)!
@@ -211,14 +230,17 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         )
         .updateCharacteristic(Characteristic.PM2_5Density, state.pm25)
         .updateCharacteristic(Characteristic.PM10Density, state.pm10)
-        .updateCharacteristic(Characteristic.VOCDensity, state.tvoc);
+        .updateCharacteristic(
+          Characteristic.VOCDensity,
+          this.convertTVOCToDensity(state.tvoc),
+        );
 
       accessory
         .getService(Service.AirPurifier)!
         .updateCharacteristic(Characteristic.FilterLifeLevel, state.filterLife)
         .updateCharacteristic(
           Characteristic.FilterChangeIndication,
-          parseInt(state.filterLife) < 10
+          state.filterLife < 10
             ? Characteristic.FilterChangeIndication.CHANGE_FILTER
             : Characteristic.FilterChangeIndication.FILTER_OK,
         )
@@ -273,7 +295,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
               .getCharacteristic(Characteristic.Active).value !== value
           ) {
             this.sendCommand(pncId, 'WorkMode', workMode);
-            this.log.info('%s AirPurifier Active was set to: ' + workMode);
+            this.log.info(
+              '%s AirPurifier Active was set to: ' + workMode,
+              accessory.displayName,
+            );
           }
 
           callback();
@@ -291,7 +316,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
               ? WorkModes.Manual
               : WorkModes.Auto;
           this.sendCommand(pncId, 'WorkMode', workMode);
-          this.log.info('%s AirPurifier Work Mode was set to: ' + workMode);
+          this.log.info(
+            '%s AirPurifier Work Mode was set to: ' + workMode,
+            accessory.displayName,
+          );
           callback();
         },
       );
@@ -307,7 +335,10 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
           );
           this.sendCommand(pncId, 'FanSpeed', fanSpeed);
 
-          this.log.info('%s AirPurifier Fan Speed set to: ' + fanSpeed);
+          this.log.info(
+            '%s AirPurifier Fan Speed set to: ' + fanSpeed,
+            accessory.displayName,
+          );
           callback();
         },
       );
@@ -318,9 +349,19 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       .on(
         CharacteristicEventTypes.SET,
         (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-          this.sendCommand(pncId, 'SafetyLock', value);
+          if (
+            accessory
+              .getService(Service.AirPurifier)!
+              .getCharacteristic(Characteristic.LockPhysicalControls).value !==
+            value
+          ) {
+            this.sendCommand(pncId, 'SafetyLock', value);
 
-          this.log.info('%s AirPurifier Saftey Lock set to: ' + value);
+            this.log.info(
+              '%s AirPurifier Saftey Lock set to: ' + value,
+              accessory.displayName,
+            );
+          }
           callback();
         },
       );
@@ -331,9 +372,18 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       .on(
         CharacteristicEventTypes.SET,
         (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-          this.sendCommand(pncId, 'Ionizer', value);
+          if (
+            accessory
+              .getService(Service.AirPurifier)!
+              .getCharacteristic(Characteristic.SwingMode).value !== value
+          ) {
+            this.sendCommand(pncId, 'Ionizer', value);
 
-          this.log.info('%s AirPurifier Ionizer set to: ' + value);
+            this.log.info(
+              '%s AirPurifier Ionizer set to: ' + value,
+              accessory.displayName,
+            );
+          }
           callback();
         },
       );
@@ -341,7 +391,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
-  addAccessory({ name, modelName, pncId }) {
+  addAccessory({ name, modelName, pncId, firmwareVersion }) {
     const uuid = hap.uuid.generate(pncId);
 
     if (!this.isAccessoryRegistered(name, uuid)) {
@@ -361,7 +411,8 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         .getService(Service.AccessoryInformation)!
         .setCharacteristic(Characteristic.Manufacturer, 'Electrolux')
         .setCharacteristic(Characteristic.Model, modelName)
-        .setCharacteristic(Characteristic.SerialNumber, pncId);
+        .setCharacteristic(Characteristic.SerialNumber, pncId)
+        .setCharacteristic(Characteristic.FirmwareRevision, firmwareVersion);
 
       this.configureAccessory(accessory);
 
@@ -422,5 +473,30 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     }
 
     return Characteristic.TargetAirPurifierState.MANUAL;
+  }
+
+  // Best effort attempt to convert Wellbeing TVOC ppb reading to μg/m3, but we lack insight into their algorithms
+  // or TVOC densities. We assume 1 ppb = 3.243 μg/m3 (see benzene @ 20C [1]) as this produces results (μg/m3) that fit
+  // quite well within the defined ranges in [2].
+  //
+  // Wellbeing defines 1500 ppb as possibly having an effect on health when exposed to these levels for a month, [2]
+  // lists 400-500 μg/m3 as _marginal_ which sounds like a close approximation. Here's an example where 1500 ppb falls
+  // within the _marginal_ range.
+  //
+  //   1500 * 3.243 / 10 = 486.45
+  //
+  // Note: It's uncertain why we have to divide the result by 10 for the values to make sense, perhaps this is a
+  // Wellbeing quirk, but at least the values look good.
+  //
+  // The maximum value shown by Wellbeing is 4000 ppb and the maximum value accepted by HomeKit is 1000 μg/m3, our
+  // assumed molecular density may put the value outside of the HomeKit range, but not by much, which seems acceptable:
+  //
+  //  4000 * 3.243 / 10 = 1297.2
+  //
+  // [1] https://uk-air.defra.gov.uk/assets/documents/reports/cat06/0502160851_Conversion_Factors_Between_ppb_and.pdf
+  // [2] https://myhealthyhome.info/assets/pdfs/TB531rev2TVOCInterpretation.pdf
+  convertTVOCToDensity(tvocppb: number): number {
+    const ugm3 = (tvocppb * 3.243) / 10;
+    return Math.min(ugm3, 1000);
   }
 }
