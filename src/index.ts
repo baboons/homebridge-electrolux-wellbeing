@@ -15,7 +15,7 @@ import {
 import { AxiosInstance } from 'axios';
 
 import { createClient } from './api';
-import { Appliance, WorkModes } from './types';
+import { Appliance, WorkModes, WellbeingApi } from './types';
 
 const PLUGIN_NAME = 'electrolux-wellbeing';
 const PLATFORM_NAME = 'ElectroluxWellbeing';
@@ -117,14 +117,11 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
     );
   }
 
-  async fetchApplianceData(pncId: string) {
+  async fetchApplianceData(pncId: string): Promise<Appliance | undefined> {
     try {
-      const response = await this.client!.get(`/Appliances/${pncId}`);
-      const {
-        twin: {
-          properties: { reported },
-        },
-      } = response.data;
+      const response: { data: WellbeingApi.ApplianceData } =
+        await this.client!.get(`/Appliances/${pncId}`);
+      const reported = response.data.twin.properties.reported;
 
       return {
         pncId,
@@ -159,8 +156,9 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
 
   async getAllAppliances() {
     try {
-      const response = await this.client!.get('/Domains/Appliances');
-      return _.get(response, 'data', []);
+      const response: { data: WellbeingApi.Appliance[] } =
+        await this.client!.get('/Domains/Appliances');
+      return response.data;
     } catch (err) {
       this.log.info('Could not fetch appliances: ' + err);
       return [];
@@ -240,7 +238,7 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         .updateCharacteristic(Characteristic.FilterLifeLevel, state.filterLife)
         .updateCharacteristic(
           Characteristic.FilterChangeIndication,
-          parseInt(state.filterLife) < 10
+          state.filterLife < 10
             ? Characteristic.FilterChangeIndication.CHANGE_FILTER
             : Characteristic.FilterChangeIndication.FILTER_OK,
         )
