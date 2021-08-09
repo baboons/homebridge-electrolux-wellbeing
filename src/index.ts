@@ -212,13 +212,15 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
         .getService(Service.CarbonDioxideSensor)!
         .updateCharacteristic(Characteristic.CarbonDioxideLevel, state.co2);
 
-      // Env Light Level needs to be tested with lux meter
-      accessory
-        .getService(Service.LightSensor)!
-        .updateCharacteristic(
-          Characteristic.CurrentAmbientLightLevel,
-          state.envLightLevel,
-        );
+      if (state.envLightLevel) {
+        // Env Light Level needs to be tested with lux meter
+        accessory
+          .getService(Service.LightSensor)!
+          .updateCharacteristic(
+            Characteristic.CurrentAmbientLightLevel,
+            state.envLightLevel,
+          );
+      }
 
       accessory
         .getService(Service.AirQualitySensor)!
