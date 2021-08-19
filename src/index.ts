@@ -189,6 +189,11 @@ class ElectroluxWellbeingPlatform implements DynamicPlatformPlugin {
       const { pncId } = accessory.context;
       const state = this.getApplianceState(pncId, data);
 
+      // Guard against missing data due to API request failure.
+      if (!state) {
+        return;
+      }
+
       // Keep firmware revision up-to-date in case the device is updated.
       accessory
         .getService(Service.AccessoryInformation)!
